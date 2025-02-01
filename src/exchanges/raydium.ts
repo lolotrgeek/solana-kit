@@ -5,10 +5,11 @@ import { MICRO_LAMPORTS_PER_LAMPORT } from '../utils/constants';
 import { getPrioritizationFees } from '../utils/fees';
 import { bankersRound } from '../utils/round';
 import { getPool, Pool } from '../utils/pool';
-import { Exchange, ExchangeConfig, Swap, ConfirmedSwap, BuiltSwap, SwapError, ConfirmationStatus, QuoteRequest } from "./exchange";
+import { Exchange, ExchangeConfig, Swap, ConfirmedSwap, BuiltSwap, SwapError, QuoteRequest } from "./exchange";
 import { delay } from "../utils/delay";
 import { log } from "../utils/logger";
 import { Wallet } from "../wallets/solanaWallet";
+import { checkTransaction, ConfirmationStatus } from "../utils/check";
 
 /** The value of a desired Trade. */
 export interface Quote {
@@ -290,7 +291,7 @@ export class Raydium extends Exchange {
                 return this.sendAndConfirmTransaction(transaction, blockHeight, txid, retries + 1)
             }
         }
-        const check = await this.checkTransaction(txid)
+        const check = await checkTransaction(txid)
         log(`🔄 Checking transaction status: ${check.status} ${check.value ?? ''}`)
         // TODO: there is a chance that a confirmed transaction could be reverted or dropped... maybe we check wallet balance after a confirmed transaction to ensure it went through?
         // (possible that RPC node doesn't like being spammed and is dropping the transaction)
@@ -311,22 +312,6 @@ export class Raydium extends Exchange {
         // 400 ms is that the rate at which txns are confirmed, 4 seconds is the rate at which blocks are confirmed
         await delay(400)
         return this.sendAndConfirmTransaction(transaction, blockHeight, txid, retries)
-    }
-
-    public async checkTransaction(txid: string): Promise<ConfirmationStatus> {
-        try {
-            // NOTE: may want to set searchTransactionHistory to true if we are checking a transaction that is older
-            const status = await this.transactionConnection.getSignatureStatuses([txid], { searchTransactionHistory: false })
-            if (!status) return { status: 'pending', value: 'No status found' }
-            if (!status.value) return { status: 'pending', value: 'No status value found' }
-            if(!status.value[0]) return { status: 'pending', value: 'No status value found' }
-            if (status.value[0].err) return { status: 'error', value: JSON.stringify(status.value[0].err) }
-            if (status && status.value && status.value[0].confirmationStatus) return { status: status.value[0].confirmationStatus }
-            return { status: 'pending' }
-        } catch (error) {
-            return { status: 'pending', value: JSON.stringify(error) }
-        }
-
     }
 
     /**
@@ -392,7 +377,7 @@ export class Raydium extends Exchange {
         if (failed) throw (new Error(`Transaction never finalized: ${txid}`))
         try {
             if (retries > 30) {
-                const reCheck = await this.checkTransaction(txid)
+                const reCheck = await checkTransaction(txid)
                 failed = await this.hasFailed(reCheck, lastValidBlockHeight)
             }
             log(`🔄 Finalizing Transaction ${txid}...`)
@@ -436,7 +421,7 @@ export class Raydium extends Exchange {
             this.transactionConnection.onSignature(txid, async (message: any) => {
                 // TODO: pretty sure we don't need to ubsubscribe given the caution in the docs: https://solana.com/docs/rpc/websocket/signaturesubscribe
                 if (message?.value?.err) {
-                    const status = await this.checkTransaction(txid)
+                    const status = await checkTransaction(txid)
                     const hasFailed = await this.hasFailed(status, blockHeight)
                 }
                 if (message?.value?.confirmationStatus === 'confirmed' || message?.value?.confirmationStatus === 'finalized') {
@@ -479,7 +464,7 @@ export class Raydium extends Exchange {
      * @returns 
      */
     public async waitingForConfirmation(txid: string, blockHeight: number, retries = 0): Promise<boolean> {
-        const check = await this.checkTransaction(txid)
+        const check = await checkTransaction(txid)
         log(`🔄 Checking transaction status: ${check.status} ${check.value ?? ''}`)
         if (check.status === 'confirmed' || check.status === 'finalized') return true
         if (check.status === 'pending') { }

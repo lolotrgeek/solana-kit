@@ -55,12 +55,6 @@ export interface ConfirmedSwap {
     err: SwapError | null
 }
 
-export interface ConfirmationStatus {
-    status: 'pending' | 'processed' | 'confirmed' | 'finalized' | 'error'
-    value?: string
-}
-
-
 export interface SwapError {
     status: string;
     value: string;
