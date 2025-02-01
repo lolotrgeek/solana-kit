@@ -1,13 +1,14 @@
-import { clusterApiUrl, Connection, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { clusterApiUrl, Connection, LAMPORTS_PER_SOL, PublicKey, sendAndConfirmTransaction, SystemProgram, Transaction } from "@solana/web3.js";
 import { Exchange } from "./src/exchanges/exchange";
 import { Raydium } from "./src/exchanges/raydium";
 import { Wallet } from "./src/wallets/solanaWallet";
-import { PoolAddress, TokenId } from "./src/utils/types";
+import { PoolAddress, SOL, TokenId } from "./src/utils/types";
 import { Percent, Token, TOKEN_PROGRAM_ID, TokenAmount } from "@raydium-io/raydium-sdk";
 import { getToken, isNativeAddress, SOLTOKEN, TokenData } from "./src/utils/token";
 import { isNativePool, Pool } from "./src/utils/pool";
 import { bankersRound } from "./src/utils/round";
 import { parseToPercent } from "./src/utils/percent";
+import { checkTransaction } from "./src/utils/check";
 
 export interface Config {
     cluster: string;
@@ -60,7 +61,7 @@ export class SolanaKit {
         const token = new Token(new PublicKey(TOKEN_PROGRAM_ID), new PublicKey(tokenData.address), tokenData.decimals, tokenData.symbol, tokenData.name);
         return { token, pool };
     }
-    
+
     /**
      * Get the price of pool in SOL
      * @param poolId 
@@ -88,7 +89,7 @@ export class SolanaKit {
         )
         const swap = await this.exchange.executeSwap(wallet, quote);
         if (swap.err) throw Error(`Swap Error: ${swap.err.value}`);
-        const value = Number(swap.amountOut.raw) 
+        const value = Number(swap.amountOut.raw)
         const valueUI = amount / (10 ** token.decimals)
         return { value, valueUI };
     }
@@ -106,5 +107,23 @@ export class SolanaKit {
         const value = Number(swap.amountOut.raw)
         const valueUI = value / LAMPORTS_PER_SOL
         return { value, valueUI };
+    }
+
+    async send(wallet: Wallet, to: string, amount: SOL): Promise<Success> {
+        const amountIn = new TokenAmount(SOLTOKEN, bankersRound(amount * LAMPORTS_PER_SOL));
+        const transaction = new Transaction().add(
+            SystemProgram.transfer({
+                fromPubkey: wallet.keypair.publicKey,
+                toPubkey: new PublicKey(to),
+                lamports: amount * LAMPORTS_PER_SOL,
+            })
+        );
+        const signature = await sendAndConfirmTransaction(
+            this.connection,
+            transaction,
+            [wallet.keypair]
+        )
+        await checkTransaction(signature)
+        return { value: amountIn.raw, valueUI: amount };
     }
 }
